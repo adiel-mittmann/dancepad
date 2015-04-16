@@ -1,0 +1,157 @@
+--- linux-2.6.29.6/drivers/input/joydev.c.bak	2010-10-07 01:14:09.474950133 -0300
++++ linux-2.6.29.6/drivers/input/joydev.c	2010-10-07 01:16:12.899752479 -0300
+@@ -56,6 +56,8 @@
+ 	__u8 absmap[ABS_MAX + 1];
+ 	__u8 abspam[ABS_MAX + 1];
+ 	__s16 abs[ABS_MAX + 1];
++	unsigned x_axis_status;
++	unsigned y_axis_status;
+ };
+ 
+ struct joydev_client {
+@@ -116,13 +118,36 @@
+ 	kill_fasync(&client->fasync, SIGIO, POLL_IN);
+ }
+ 
++static void joydev_send_event(struct js_event *event, struct joydev *joydev)
++{
++	struct joydev_client *client;
++	event->time = jiffies_to_msecs(jiffies);
++
++	rcu_read_lock();
++	list_for_each_entry_rcu(client, &joydev->client_list, node)
++		joydev_pass_event(client, event);
++	rcu_read_unlock();
++}
++
+ static void joydev_event(struct input_handle *handle,
+ 			 unsigned int type, unsigned int code, int value)
+ {
+ 	struct joydev *joydev = handle->private;
+-	struct joydev_client *client;
+ 	struct js_event event;
+ 
++#       define JOYDEV_LEFT 12 
++#       define JOYDEV_RIGHT 13 
++#       define JOYDEV_UP 14 
++#       define JOYDEV_DOWN 15 
++#       define X_AXIS 0
++#       define Y_AXIS 1
++#       define X_AXIS_LEFT 1
++#       define X_AXIS_RIGHT 2
++#       define Y_AXIS_UP 1
++#       define Y_AXIS_DOWN 2
++	unsigned x_axis_new_status = joydev->x_axis_status;
++	unsigned y_axis_new_status = joydev->y_axis_status;
++
+ 	switch (type) {
+ 
+ 	case EV_KEY:
+@@ -131,29 +156,81 @@
+ 		event.type = JS_EVENT_BUTTON;
+ 		event.number = joydev->keymap[code - BTN_MISC];
+ 		event.value = value;
++
++		joydev_send_event(&event, joydev);
++
+ 		break;
+ 
+ 	case EV_ABS:
+-		event.type = JS_EVENT_AXIS;
+-		event.number = joydev->absmap[code];
+-		event.value = joydev_correct(value,
+-					&joydev->corr[event.number]);
+-		if (event.value == joydev->abs[event.number])
+-			return;
+-		joydev->abs[event.number] = event.value;
+-		break;
++		if (code == X_AXIS)
++		{
++			if (value == 0)
++			{
++				x_axis_new_status |= X_AXIS_LEFT;
++				x_axis_new_status &= ~X_AXIS_RIGHT;
++			}
++			if (value == 255)
++			{
++				x_axis_new_status |= X_AXIS_RIGHT;
++				x_axis_new_status &= ~X_AXIS_LEFT;
++			}
++			if (value == 128)
++				x_axis_new_status |= X_AXIS_LEFT | X_AXIS_RIGHT;
++			if (value == 127)
++				x_axis_new_status = 0;
++		}
++		if (code == Y_AXIS)
++		{
++			if (value == 0)
++			{
++				y_axis_new_status |= Y_AXIS_UP;
++				y_axis_new_status &= ~Y_AXIS_DOWN;
++			}
++			if (value == 255)
++			{
++				y_axis_new_status |= Y_AXIS_DOWN;
++				y_axis_new_status &= ~Y_AXIS_UP;
++			}
++			if (value == 128)
++				y_axis_new_status |= Y_AXIS_UP | Y_AXIS_DOWN;
++			if (value == 127)
++				y_axis_new_status = 0;
++		}
+ 
++		event.type = JS_EVENT_BUTTON;
++		if ((x_axis_new_status ^ joydev->x_axis_status) & X_AXIS_LEFT)
++		{
++			event.number = JOYDEV_LEFT;
++			event.value = (x_axis_new_status & X_AXIS_LEFT) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((x_axis_new_status ^ joydev->x_axis_status) & X_AXIS_RIGHT)
++		{
++			event.number = JOYDEV_RIGHT;
++			event.value = (x_axis_new_status & X_AXIS_RIGHT) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((y_axis_new_status ^ joydev->y_axis_status) & Y_AXIS_UP)
++		{
++			event.number = JOYDEV_UP;
++			event.value = (y_axis_new_status & Y_AXIS_UP) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((y_axis_new_status ^ joydev->y_axis_status) & Y_AXIS_DOWN)
++		{
++			event.number = JOYDEV_DOWN;
++			event.value = (y_axis_new_status & Y_AXIS_DOWN) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++
++		joydev->x_axis_status = x_axis_new_status;
++		joydev->y_axis_status = y_axis_new_status;
++
++		break;
+ 	default:
+ 		return;
+ 	}
+ 
+-	event.time = jiffies_to_msecs(jiffies);
+-
+-	rcu_read_lock();
+-	list_for_each_entry_rcu(client, &joydev->client_list, node)
+-		joydev_pass_event(client, &event);
+-	rcu_read_unlock();
+-
+ 	wake_up_interruptible(&joydev->wait);
+ }
+ 
+@@ -800,6 +877,10 @@
+ 		}
+ 	}
+ 
++        joydev->x_axis_status = 0;
++        joydev->y_axis_status = 0;
++        joydev->nkey += 4;
++
+ 	dev_set_name(&joydev->dev, joydev->name);
+ 	joydev->dev.devt = MKDEV(INPUT_MAJOR, JOYDEV_MINOR_BASE + minor);
+ 	joydev->dev.class = &input_class;

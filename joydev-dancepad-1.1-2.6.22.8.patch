@@ -1,0 +1,179 @@
+--- linux-2.6.22.8/drivers/input/joydev.c.bak	2007-09-25 03:05:13.000000000 -0300
++++ linux-2.6.22.8/drivers/input/joydev.c	2008-06-28 03:23:24.000000000 -0300
+@@ -52,6 +52,8 @@
+ 	__u8 absmap[ABS_MAX + 1];
+ 	__u8 abspam[ABS_MAX + 1];
+ 	__s16 abs[ABS_MAX + 1];
++	unsigned x_axis_status;
++	unsigned y_axis_status;
+ };
+ 
+ struct joydev_client {
+@@ -83,46 +85,122 @@
+ 	return value < -32767 ? -32767 : (value > 32767 ? 32767 : value);
+ }
+ 
++static void joydev_send_event(struct js_event *event, struct joydev *joydev)
++{
++	struct joydev_client *client;
++	event->time = jiffies_to_msecs(jiffies);
++
++	list_for_each_entry(client, &joydev->client_list, node) {
++
++		memcpy(client->buffer + client->head, event, sizeof(struct js_event));
++
++		if (client->startup == joydev->nabs + joydev->nkey)
++			if (client->tail == (client->head = (client->head + 1) & (JOYDEV_BUFFER_SIZE - 1)))
++				client->startup = 0;
++
++		kill_fasync(&client->fasync, SIGIO, POLL_IN);
++	}
++}
++
+ static void joydev_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
+ {
+ 	struct joydev *joydev = handle->private;
+-	struct joydev_client *client;
+ 	struct js_event event;
+ 
+-	switch (type) {
+-
+-		case EV_KEY:
+-			if (code < BTN_MISC || value == 2)
+-				return;
+-			event.type = JS_EVENT_BUTTON;
+-			event.number = joydev->keymap[code - BTN_MISC];
+-			event.value = value;
+-			break;
++#       define JOYDEV_LEFT 12 
++#       define JOYDEV_RIGHT 13 
++#       define JOYDEV_UP 14 
++#       define JOYDEV_DOWN 15 
++#       define X_AXIS 0
++#       define Y_AXIS 1
++#       define X_AXIS_LEFT 1
++#       define X_AXIS_RIGHT 2
++#       define Y_AXIS_UP 1
++#       define Y_AXIS_DOWN 2
++	unsigned x_axis_new_status = joydev->x_axis_status;
++	unsigned y_axis_new_status = joydev->y_axis_status;
+ 
+-		case EV_ABS:
+-			event.type = JS_EVENT_AXIS;
+-			event.number = joydev->absmap[code];
+-			event.value = joydev_correct(value, joydev->corr + event.number);
+-			if (event.value == joydev->abs[event.number])
+-				return;
+-			joydev->abs[event.number] = event.value;
+-			break;
++	switch (type) {
+ 
+-		default:
++	case EV_KEY:
++		if (code < BTN_MISC || value == 2)
+ 			return;
+-	}
++		event.type = JS_EVENT_BUTTON;
++		event.number = joydev->keymap[code - BTN_MISC];
++		event.value = value;
+ 
+-	event.time = jiffies_to_msecs(jiffies);
++		joydev_send_event(&event, joydev);
+ 
+-	list_for_each_entry(client, &joydev->client_list, node) {
++		break;
+ 
+-		memcpy(client->buffer + client->head, &event, sizeof(struct js_event));
++	case EV_ABS:
++		if (code == X_AXIS)
++		{
++			if (value == 0)
++			{
++				x_axis_new_status |= X_AXIS_LEFT;
++				x_axis_new_status &= ~X_AXIS_RIGHT;
++			}
++			if (value == 255)
++			{
++				x_axis_new_status |= X_AXIS_RIGHT;
++				x_axis_new_status &= ~X_AXIS_LEFT;
++			}
++			if (value == 128)
++				x_axis_new_status |= X_AXIS_LEFT | X_AXIS_RIGHT;
++			if (value == 127)
++				x_axis_new_status = 0;
++		}
++		if (code == Y_AXIS)
++		{
++			if (value == 0)
++			{
++				y_axis_new_status |= Y_AXIS_UP;
++				y_axis_new_status &= ~Y_AXIS_DOWN;
++			}
++			if (value == 255)
++			{
++				y_axis_new_status |= Y_AXIS_DOWN;
++				y_axis_new_status &= ~Y_AXIS_UP;
++			}
++			if (value == 128)
++				y_axis_new_status |= Y_AXIS_UP | Y_AXIS_DOWN;
++			if (value == 127)
++				y_axis_new_status = 0;
++		}
+ 
+-		if (client->startup == joydev->nabs + joydev->nkey)
+-			if (client->tail == (client->head = (client->head + 1) & (JOYDEV_BUFFER_SIZE - 1)))
+-				client->startup = 0;
++		event.type = JS_EVENT_BUTTON;
++		if ((x_axis_new_status ^ joydev->x_axis_status) & X_AXIS_LEFT)
++		{
++			event.number = JOYDEV_LEFT;
++			event.value = (x_axis_new_status & X_AXIS_LEFT) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((x_axis_new_status ^ joydev->x_axis_status) & X_AXIS_RIGHT)
++		{
++			event.number = JOYDEV_RIGHT;
++			event.value = (x_axis_new_status & X_AXIS_RIGHT) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((y_axis_new_status ^ joydev->y_axis_status) & Y_AXIS_UP)
++		{
++			event.number = JOYDEV_UP;
++			event.value = (y_axis_new_status & Y_AXIS_UP) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
++		if ((y_axis_new_status ^ joydev->y_axis_status) & Y_AXIS_DOWN)
++		{
++			event.number = JOYDEV_DOWN;
++			event.value = (y_axis_new_status & Y_AXIS_DOWN) > 0 ? 1 : 0;
++			joydev_send_event(&event, joydev);
++		}
+ 
+-		kill_fasync(&client->fasync, SIGIO, POLL_IN);
++		joydev->x_axis_status = x_axis_new_status;
++		joydev->y_axis_status = y_axis_new_status;
++
++		break;
++	default:
++		return;
+ 	}
+ 
+ 	wake_up_interruptible(&joydev->wait);
+@@ -547,6 +625,9 @@
+ 		joydev->abs[i] = joydev_correct(dev->abs[j], joydev->corr + i);
+ 	}
+ 
++        joydev->x_axis_status = 0;
++        joydev->y_axis_status = 0;
++
+ 	joydev_table[minor] = joydev;
+ 
+ 	devt = MKDEV(INPUT_MAJOR, JOYDEV_MINOR_BASE + minor),
+@@ -577,6 +658,7 @@
+  err_free_joydev:
+ 	joydev_table[minor] = NULL;
+ 	kfree(joydev);
++        joydev->nkey += 4;
+ 	return error;
+ }
+ 
