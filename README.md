@@ -31,20 +31,21 @@ If the steps above sound difficult, you may want to read the answers to [this qu
 
 # Applying this patch to your kernel for geeks / non-kernel developers.
 
-Here is the workings of how to apply this patch to your kernel.   These steps have been tested on Mageia 5, but should work on a number of distributions.
-These are based on - https://wiki.archlinux.org/index.php/Compile_kernel_module
+Here is the workings of how to apply this patch to your kernel.  Separate instructions are provided for Mageia 5 and Arch Linux. If you're using other Linux distribution you may need to adjust them slightly.
 
-## Prep:
+## Prep
 You will need at least:  patch, wget, gcc and make installed, along with enough space for ther kernel source that matches your distribution.
 This does expect you to be comfortable with the command line.
 
-## Backup existing module:
+## Backup existing module
 ```bash
 cd /lib/modules/`uname -r`/kernel/drivers/input/
 cp joydev.ko.xz joydev.ko.xz.orig
 ```
 
-## Unpack and CD into to the kernel source tree
+## Mageia 5
+
+### Unpack and CD into to the kernel source tree
 Get your running kernel version, by running `uname -r`
 
 Install matching source, in my case 4.4.92-1.mga5
@@ -53,6 +54,7 @@ Install matching source, in my case 4.4.92-1.mga5
  cd /usr/src/kernel-4.4.92-1.mga5
  ls -l drivers/input/joydev.c && echo "Yes, this is the correct place and the source file is present."
 ```
+
 ### Get the patch
 ```bash
  wget https://raw.githubusercontent.com/adiel-mittmann/dancepad/master/joydev-dancepad-1.2-4.13.3.patch
@@ -72,7 +74,7 @@ Output should be like:
  Hunk #4 succeeded at 1008 (offset -5 lines).
 ```
 
-## Prepare the source tree to compile modules for your existing running kernel
+### Prepare the source tree to compile modules for your existing running kernel
 ```bash
 make mrproper
 cp /usr/lib/modules/$(uname -r)/build/.config ./
@@ -81,17 +83,19 @@ make oldconfig
 make prepare && make scripts
 ```
 
-## Build the input modules
+### Build the input modules
 ```bash
 make SUBDIRS=drivers/input modules
 ```
-## Check output from the build
+
+### Check output from the build
 ```bash
 ls drivers/input/joydev.ko -l
 xz drivers/input/joydev.ko
 ```
-## Install module
-unplug the game pad, if you have it plugged in, then:
+
+### Install module
+unplug the dance pad, if you have it plugged in, then:
  ```bash
  rmmod joydev
  cp drivers/input/joydev.ko.xz /lib/modules/`uname -r`/kernel/drivers/input/
@@ -101,7 +105,69 @@ unplug the game pad, if you have it plugged in, then:
  lsmod | grep joydev
  rmmod joydev
 ```
-## Plugin game pad
+
+## Arch Linux
+
+All commands listed below are run under your regular non-root user. `Sudo` is used for commands that need root access.
+
+### Get and unpack kernel source tree into ~/build
+
+```bash
+sudo pacman -S asp
+
+cd ~
+mkdir build
+cd build
+
+asp update linux
+asp export linux
+
+cd linux
+makepkg -od
+
+cd src/archlinux-linux
+```
+
+### Get the patch
+```bash
+wget https://raw.githubusercontent.com/adiel-mittmann/dancepad/master/joydev-dancepad-1.2-4.13.3.patch
+```
+
+### Apply patch
+```bash
+patch -Np1 -i joydev-dancepad-1.2-4.13.3.patch
+```
+
+Edit `drivers/input/joydev.c`: adjust `DANCEPAD_VENDOR` and `DANCEPAD_PRODUCT` based on `lsusb` output while the dancepad is connected.
+
+### Build the module
+
+```bash
+make mrproper
+zcat /proc/config.gz > .config
+cp /usr/lib/modules/$(uname -r)/build/Module.symvers .
+make oldconfig
+make modules_prepare
+
+# this will speed up process of compilation by only compiling joydev module
+perl -i.bk -pe 's/^/#/ if /^obj-\$\(CONFIG_(INPUT_|RMI4)/ and !/joydev.o/' drivers/input/Makefile
+
+make M=drivers/input
+xz drivers/input/joydev.ko
+```
+
+### Install the module
+
+First unplug the dance pad.
+
+```bash
+sudo modprobe -r joydev
+sudo cp drivers/input/joydev.ko.xz /lib/modules/`uname -r`/kernel/drivers/input/
+sudo depmod
+sudo modprobe joydev
+```
+
+## Connect the dance pad
 Check the kernel logs by running: `dmesg`
 
 The output should show something like the example below.  The "Dancepad detected: activating workaround" entries are important.
@@ -116,6 +182,21 @@ The output should show something like the example below.  The "Dancepad detected
 [14293.269376] pantherlord 0003:0810:0001.000B: Force feedback for PantherLord/GreenAsia devices by Anssi Hannula <anssi.hannula@gmail.com>
 [14293.276830] Dancepad detected: activating workaround.
 [14293.320238] Dancepad detected: activating workaround.
+```
+
+## Remove /dev/input/eventXY before running stepmania
+
+You'll need to do this everytime you reconnect the dance pad and/or reboot your computer.
+```bash
+sudo rm $(readlink -f $(evdev-joystick --l))
+```
+
+If you're looking for a permanent solution you could try to add this `udev` rule into `/usr/lib/udev/rules.d/99-remove_event_device_for_patched_joydev_device.rules`:
+
+```
+# remove /dev/input/event device corresponding to an axis-issue affected dance pad
+# adjust idVendor and idProduct variables based on the output of lsusb command (while dance pad is connected)
+KERNEL=="event*", NAME="input/%k", ATTRS{idVendor}=="0810", ATTRS{idProduct}=="0001", ACTION=="add", RUN+="/usr/bin/rm /dev/input/%k"
 ```
 
 # Thanks
