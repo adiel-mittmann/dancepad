@@ -23,7 +23,7 @@ Download the file that best matches your kernel version, but notice that version
 ````
 patch -Np1 -i joydev-dancepad.patch
 ````
-2. Edit `drivers/input/joydev.c` so that the macros `DANCEPAD_VENDOR` and `DANCEPAD_VENDOR` correspond to your adapter.  You can find which values to use with, e.g., `lsusb`.
+2. Edit `drivers/input/joydev.c` so that the macros `DANCEPAD_VENDOR` and `DANCEPAD_PRODUCT` correspond to your adapter.  You can find which values to use with, e.g., `lsusb`.
 3. Compile and install `joydev.ko`.
 4. When using the module, make sure StepMania is reading from `/dev/input/js*`, and not `/dev/input/event*`.  You could remove the latter in order to make sure it will read from the correct device.
 
@@ -197,6 +197,16 @@ If you're looking for a permanent solution you could try to add this `udev` rule
 # remove /dev/input/event device corresponding to an axis-issue affected dance pad
 # adjust idVendor and idProduct variables based on the output of lsusb command (while dance pad is connected)
 KERNEL=="event*", NAME="input/%k", ATTRS{idVendor}=="0810", ATTRS{idProduct}=="0001", ACTION=="add", RUN+="/usr/bin/rm /dev/input/%k"
+```
+
+# DKMS configuration
+
+Experimental DKMS setup is located in `dkms/`. In order to use it copy `joydev_dance-1.0` directory into `/usr/src` (edit VENDOR and PRODUCT in `joydev_dance.c` if appropriate) and run `dkms install joydev_dance/1.0`. This should compile and install `joydev_dance` module which can live next to the official `joydev` module. Also DKMS framework should take care of recompiling this module everytime you change (e. g. upgrade) your kernel which means you have one less thing to worry about.
+
+Beware that you *have to* blacklist `joydev` module so that only the patched one is loaded (otherwise you'll end up with two gamepads detected).
+
+```
+echo "blacklist joydev" > /etc/modprobe.d/joydev.conf 
 ```
 
 # Thanks
