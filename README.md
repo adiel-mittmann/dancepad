@@ -31,7 +31,7 @@ If the steps above sound difficult, you may want to read the answers to [this qu
 
 # Applying this patch to your kernel for geeks / non-kernel developers.
 
-Here is the workings of how to apply this patch to your kernel.  Separate instructions are provided for Mageia 5 and Arch Linux. If you're using other Linux distribution you may need to adjust them slightly.
+Here is the workings of how to apply this patch to your kernel.  Separate instructions are provided for Mageia 5, Arch Linux and Raspbian (Raspberry Pi). If you're using other Linux distribution you may need to adjust them slightly.
 
 ## Prep
 You will need at least:  patch, wget, gcc and make installed, along with enough space for ther kernel source that matches your distribution.
@@ -107,53 +107,46 @@ unplug the dance pad, if you have it plugged in, then:
 ```
 
 ## Arch Linux
-
 All commands listed below are run under your regular non-root user. `Sudo` is used for commands that need root access.
 
-### Get and unpack kernel source tree into ~/build
-
+### Make sure kernel headers are installed
 ```bash
-sudo pacman -S asp
-
-cd ~
-mkdir build
-cd build
-
-asp update linux
-asp export linux
-
-cd linux
-makepkg -od
-
-cd src/archlinux-linux
+pacman -Sy linux-headers
 ```
 
-### Get the patch
+## Prepare build environment
 ```bash
-wget https://raw.githubusercontent.com/adiel-mittmann/dancepad/master/joydev-dancepad-1.2-4.13.3.patch
+mkdir joydev
+cd joydev
+
+cat > Makefile <<"HERE"
+obj-m = joydev.o
+KVERSION = $(shell uname -r)
+
+all:
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) modules
+clean:
+	make -C /lib/modules/$(KVERSION)/build M=$(PWD) clean
+HERE
+
+# get the latest joydev source code.
+# if you need a specific version - you can use any tag listed at https://github.com/torvalds/linux/tags
+# instead of HEAD
+wget -q https://raw.githubusercontent.com/torvalds/linux/HEAD/drivers/input/joydev.c
+
+# get the patch
+wget -q https://raw.githubusercontent.com/adiel-mittmann/dancepad/master/joydev-dancepad-1.2-4.13.3.patch
+
+# patch the source
+patch -Np3 -i joydev-dancepad-1.2-4.13.3.patch
+
+# edit joydev.c changing DANCEPAD_VENDOR and/or DANCEPAD_PRODUCT if necessary
 ```
 
-### Apply patch
+## Build the module
 ```bash
-patch -Np1 -i joydev-dancepad-1.2-4.13.3.patch
-```
-
-Edit `drivers/input/joydev.c`: adjust `DANCEPAD_VENDOR` and `DANCEPAD_PRODUCT` based on `lsusb` output while the dancepad is connected.
-
-### Build the module
-
-```bash
-make mrproper
-zcat /proc/config.gz > .config
-cp /usr/lib/modules/$(uname -r)/build/Module.symvers .
-make oldconfig
-make modules_prepare
-
-# this will speed up process of compilation by only compiling joydev module
-perl -i.bk -pe 's/^/#/ if /^obj-\$\(CONFIG_(INPUT_|RMI4)/ and !/joydev.o/' drivers/input/Makefile
-
-make M=drivers/input
-xz drivers/input/joydev.ko
+make
+xz joydev.ko
 ```
 
 ### Install the module
@@ -162,10 +155,21 @@ First unplug the dance pad.
 
 ```bash
 sudo modprobe -r joydev
-sudo cp drivers/input/joydev.ko.xz /lib/modules/`uname -r`/kernel/drivers/input/
+sudo cp joydev.ko.xz /lib/modules/`uname -r`/kernel/drivers/input/
 sudo depmod
 sudo modprobe joydev
 ```
+
+## Raspbian
+
+### Make sure kernel headers are installed
+```bash
+apt install raspberrypi-kernel-headers
+```
+
+### Next steps
+
+Follow Arch Linux instructions.
 
 ## Connect the dance pad
 Check the kernel logs by running: `dmesg`
