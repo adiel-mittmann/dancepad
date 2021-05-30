@@ -26,7 +26,6 @@
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@ucw.cz>, Adiel Mittmann <adiel@mittmann.net.br>");
 MODULE_DESCRIPTION("Joystick device interfaces (patched with axis fix for dance pad)");
-MODULE_SUPPORTED_DEVICE("input/js");
 MODULE_LICENSE("GPL");
 
 #define JOYDEV_MINOR_BASE	0
